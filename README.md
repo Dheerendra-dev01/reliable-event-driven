@@ -91,7 +91,7 @@ The Transactional Outbox Pattern solves this by:
 ### 1. Clone / download the project
 
 ```bash
-git clone <repo-url> reliable-event-driven
+git clone https://github.com/Dheerendra-dev01/reliable-event-driven
 cd reliable-event-driven
 ```
 
