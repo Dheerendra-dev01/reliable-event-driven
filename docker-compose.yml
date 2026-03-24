@@ -1,0 +1,150 @@
+version: "3.8"
+
+services:
+  # ─── MongoDB Replica Set ────────────────────────────────────────────────────
+
+  mongo1:
+    image: mongo:6
+    container_name: mongo1
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1_data:/data/db
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27017", "--eval", "db.adminCommand('ping').ok", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  mongo2:
+    image: mongo:6
+    container_name: mongo2
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27018"]
+    ports:
+      - "27018:27018"
+    volumes:
+      - mongo2_data:/data/db
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27018", "--eval", "db.adminCommand('ping').ok", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  mongo3:
+    image: mongo:6
+    container_name: mongo3
+    command: ["--replSet", "rs0", "--bind_ip_all", "--port", "27019"]
+    ports:
+      - "27019:27019"
+    volumes:
+      - mongo3_data:/data/db
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--port", "27019", "--eval", "db.adminCommand('ping').ok", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ─── Replica Set Initializer (one-shot) ────────────────────────────────────
+
+  mongo-init:
+    image: mongo:6
+    container_name: mongo-init
+    depends_on:
+      mongo1:
+        condition: service_healthy
+      mongo2:
+        condition: service_healthy
+      mongo3:
+        condition: service_healthy
+    volumes:
+      - ./mongo-init/init-replica.sh:/init-replica.sh:ro
+    entrypoint: ["bash", "/init-replica.sh"]
+    networks:
+      - app-network
+    restart: "no"
+
+  # ─── RabbitMQ ───────────────────────────────────────────────────────────────
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - app-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─── Auth Service ───────────────────────────────────────────────────────────
+
+  auth-service:
+    build:
+      context: ./auth-service
+      dockerfile: Dockerfile
+    container_name: auth-service
+    ports:
+      - "3001:3001"
+    environment:
+      PORT: "3001"
+      MONGO_URI: "mongodb://mongo1:27017,mongo2:27018,mongo3:27019/authdb?replicaSet=rs0"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672"
+      RELAY_INTERVAL_MS: "5000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo1:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  # ─── Todo Service ───────────────────────────────────────────────────────────
+
+  todo-service:
+    build:
+      context: ./todo-service
+      dockerfile: Dockerfile
+    container_name: todo-service
+    environment:
+      MONGO_URI: "mongodb://mongo1:27017,mongo2:27018,mongo3:27019/tododb?replicaSet=rs0"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      mongo1:
+        condition: service_healthy
+    networks:
+      - app-network
+    restart: unless-stopped
+
+# ─── Volumes ─────────────────────────────────────────────────────────────────
+
+volumes:
+  mongo1_data:
+  mongo2_data:
+  mongo3_data:
+
+# ─── Networks ────────────────────────────────────────────────────────────────
+
+networks:
+  app-network:
+    driver: bridge
